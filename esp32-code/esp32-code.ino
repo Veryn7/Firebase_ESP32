@@ -1,611 +1,519 @@
-const firebaseConfig = {
-  apiKey: "",
-  authDomain: "veyin-a371e.firebaseapp.com",
-  databaseURL: "https://veyin-a371e-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "veyin-a371e",
-  storageBucket: "veyin-a371e.firebasestorage.app",
-  messagingSenderId: "1020110832896",
-  appId: "1:1020110832896:web:3df47613828c27042edfe5",
-  measurementId: "G-R44NKNW126"
+#define ENABLE_USER_AUTH
+#define ENABLE_DATABASE
+
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <FirebaseClient.h>
+#include <DHT.h>
+#include <time.h>
+
+// =====================================================
+// 1. KONFIGURASI WIFI
+// =====================================================
+#define WIFI_SSID     "p"
+#define WIFI_PASSWORD "15000000"
+
+// =====================================================
+// 2. KONFIGURASI FIREBASE
+// =====================================================
+#define API_KEY       "AIzaSyDWmQ9BmXsvph7gmFcFk1zIUdw7bUJq4Xo"
+#define USER_EMAIL    "esp32@gmail.com"
+#define USER_PASSWORD "1234567"
+
+#define DATABASE_URL  "https://veyin-a371e-default-rtdb.asia-southeast1.firebasedatabase.app"
+
+// =====================================================
+// 3. KONFIGURASI SENSOR DHT
+// =====================================================
+#define DHT_PIN 4
+
+#define DHT_TYPE DHT11
+
+DHT dht(DHT_PIN, DHT_TYPE);
+
+// =====================================================
+// 4. KONFIGURASI RELAY
+// =====================================================
+#define RELAY_1 14
+#define RELAY_2 27
+#define RELAY_3 26
+#define RELAY_4 25
+
+// Banyak modul relay memakai active LOW.
+// Artinya LOW = ON, HIGH = OFF.
+#define RELAY_ON LOW
+#define RELAY_OFF HIGH
+
+int relayPins[4] = {
+  RELAY_1,
+  RELAY_2,
+  RELAY_3,
+  RELAY_4
 };
 
-{
-  "project_title": "Pengembangan Sistem Kendali IoT Multi-Broker dengan Integrasi Perintah Suara",
-  "role": "Kamu adalah AI web developer profesional yang ahli membuat dashboard IoT modern menggunakan HTML, CSS, JavaScript, Three.js, MQTT.js, dan Firebase Authentication.",
-  "main_instruction": "Buatkan website dashboard IoT modern, responsif, interaktif, dan memiliki animasi 3D menggunakan Three.js. Website digunakan untuk memantau suhu dan kelembapan dari sensor DHT11/DHT22, mengontrol 4 relay melalui 3 MQTT broker berbeda, menampilkan voice command dengan visual spectrum 3D, serta memiliki sistem login dan logout menggunakan Firebase Authentication.",
-  "technology_stack": {
-    "frontend": [
-      "HTML",
-      "CSS",
-      "JavaScript"
-    ],
-    "3d_library": "Three.js",
-    "mqtt_library": "MQTT.js CDN",
-    "voice_feature": "Web Speech API",
-    "authentication": "Firebase Authentication",
-    "database_optional": "Firebase Realtime Database atau Firestore untuk menyimpan konfigurasi MQTT dan log jika diperlukan",
-    "deployment_target": "Firebase Hosting"
-  },
-  "hardware_system": {
-    "microcontroller": "ESP32 DevKit V1",
-    "sensor": "DHT11 atau DHT22",
-    "actuator": "4 relay atau 4 lampu",
-    "connectivity": "WiFi dan MQTT",
-    "mqtt_brokers_used": [
-      "MyQttHub",
-      "Cedalo MQTT",
-      "CrystalMQ"
-    ]
-  },
-  "authentication_requirements": {
-    "use_firebase_authentication": true,
-    "login_methods": [
-      "Email dan Password"
-    ],
-    "required_pages": [
-      "Login Page",
-      "Dashboard Page"
-    ],
-    "login_page_features": [
-      "Form email",
-      "Form password",
-      "Tombol login",
-      "Tombol register akun baru",
-      "Validasi input kosong",
-      "Pesan error jika login gagal",
-      "Redirect otomatis ke dashboard jika login berhasil"
-    ],
-    "dashboard_auth_features": [
-      "Cek status user login",
-      "Jika belum login, redirect ke halaman login",
-      "Topbar menampilkan email akun yang sedang login",
-      "Sidebar menampilkan akun yang login",
-      "Menu logout pada sidebar",
-      "Ketika logout berhasil, user diarahkan kembali ke halaman login"
-    ]
-  },
-  "layout_requirements": {
-    "main_layout": "Admin dashboard modern dengan topbar, sidebar, dan content area",
-    "topbar": {
-      "features": [
-        "Menampilkan judul aplikasi",
-        "Menampilkan tombol buka/tutup sidebar",
-        "Menampilkan email akun yang sedang login",
-        "Menampilkan status koneksi MQTT secara ringkas",
-        "Desain modern dan responsif"
-      ]
-    },
-    "sidebar": {
-      "features": [
-        "Sidebar bisa dibuka dan ditutup",
-        "Memiliki animasi transisi saat dibuka dan ditutup",
-        "Menampilkan profil akun login",
-        "Menampilkan menu navigasi",
-        "Menampilkan tombol logout"
-      ],
-      "menu_items": [
-        {
-          "name": "Dashboard",
-          "submenus": [
-            "Voice",
-            "Suhu",
-            "Kelembapan"
-          ]
-        },
-        {
-          "name": "Setting",
-          "submenus": [
-            "Konfigurasi MQTT"
-          ]
-        },
-        {
-          "name": "Static",
-          "submenus": [
-            "Data Suhu",
-            "Data Kelembapan",
-            "Log MQTT"
-          ]
-        },
-        {
-          "name": "Kontrol",
-          "submenus": [
-            "Kontrol Relay"
-          ]
-        },
-        {
-          "name": "Logout",
-          "action": "Keluar dari akun Firebase Authentication"
-        }
-      ]
-    },
-    "content_area": {
-      "features": [
-        "Menampilkan konten berdasarkan menu yang dipilih",
-        "Tanpa reload halaman",
-        "Gunakan single page application sederhana menggunakan JavaScript",
-        "Responsif untuk desktop dan mobile"
-      ]
+bool relayState[4] = {
+  false,
+  false,
+  false,
+  false
+};
+
+// =====================================================
+// 5. KONFIGURASI WAKTU NTP
+// =====================================================
+// GMT+7 Indonesia Barat
+const long gmtOffset_sec = 7 * 3600;
+const int daylightOffset_sec = 0;
+
+// =====================================================
+// 6. OBJEK FIREBASE
+// =====================================================
+UserAuth userAuth(API_KEY, USER_EMAIL, USER_PASSWORD);
+
+FirebaseApp app;
+RealtimeDatabase Database;
+
+WiFiClientSecure sslClient;
+
+using AsyncClient = AsyncClientClass;
+AsyncClient asyncClient(sslClient);
+
+// =====================================================
+// 7. VARIABEL SISTEM
+// =====================================================
+bool statusSudahDikirim = false;
+
+unsigned long lastSensorSend = 0;
+const unsigned long sensorInterval = 3000;
+
+unsigned long lastDeviceUpdate = 0;
+const unsigned long deviceUpdateInterval = 10000;
+
+unsigned long lastRelayRead = 0;
+const unsigned long relayReadInterval = 500;
+
+unsigned long lastModeRead = 0;
+const unsigned long modeReadInterval = 700;
+
+// =====================================================
+// 8. VARIABEL MODE LAMPU
+// =====================================================
+String currentMode = "NORMAL";
+bool modeActive = false;
+
+unsigned long lastModeStep = 0;
+const unsigned long modeStepInterval = 300;
+
+int modeIndex = 0;
+bool stroboState = false;
+
+// =====================================================
+// 9. CALLBACK HASIL FIREBASE
+// =====================================================
+void processData(AsyncResult &result) {
+  if (!result.isResult()) {
+    return;
+  }
+
+  if (result.isEvent()) {
+    Serial.printf(
+      "Event: %s | Pesan: %s | Kode: %d\n",
+      result.uid().c_str(),
+      result.eventLog().message().c_str(),
+      result.eventLog().code()
+    );
+  }
+
+  if (result.isDebug()) {
+    Serial.printf(
+      "Debug: %s | Pesan: %s\n",
+      result.uid().c_str(),
+      result.debug().c_str()
+    );
+  }
+
+  if (result.isError()) {
+    Serial.printf(
+      "Error: %s | Pesan: %s | Kode: %d\n",
+      result.uid().c_str(),
+      result.error().message().c_str(),
+      result.error().code()
+    );
+  }
+
+  if (result.available()) {
+    Serial.printf(
+      "Berhasil: %s | Hasil: %s\n",
+      result.uid().c_str(),
+      result.c_str()
+    );
+  }
+}
+
+// =====================================================
+// 10. FUNGSI TIMESTAMP
+// =====================================================
+String getTimestampISO() {
+  struct tm timeinfo;
+
+  if (!getLocalTime(&timeinfo)) {
+    return String(millis());
+  }
+
+  char buffer[30];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S+07:00", &timeinfo);
+
+  return String(buffer);
+}
+
+// =====================================================
+// 11. FUNGSI DASAR RELAY
+// =====================================================
+void setRelayHardware(int index, bool state) {
+  if (index < 0 || index > 3) return;
+
+  relayState[index] = state;
+
+  if (state) {
+    digitalWrite(relayPins[index], RELAY_ON);
+  } else {
+    digitalWrite(relayPins[index], RELAY_OFF);
+  }
+}
+
+void matikanSemuaRelay() {
+  for (int i = 0; i < 4; i++) {
+    setRelayHardware(i, false);
+  }
+}
+
+void nyalakanSemuaRelay() {
+  for (int i = 0; i < 4; i++) {
+    setRelayHardware(i, true);
+  }
+}
+
+void applyRelayStates() {
+  for (int i = 0; i < 4; i++) {
+    if (relayState[i]) {
+      digitalWrite(relayPins[i], RELAY_ON);
+    } else {
+      digitalWrite(relayPins[i], RELAY_OFF);
     }
-  },
-  "dashboard_menu_requirements": {
-    "dashboard_voice": {
-      "title": "Voice Command",
-      "features": [
-        "Tombol mulai mendengarkan suara",
-        "Tombol berhenti mendengarkan suara",
-        "Menampilkan teks hasil suara pengguna",
-        "Mengirim perintah suara ke MQTT topic voice command",
-        "Menampilkan visual spectrum 3D menggunakan Three.js",
-        "Spectrum bergerak mengikuti status voice command atau simulasi audio input",
-        "Gunakan Web Speech API dengan bahasa Indonesia id-ID"
-      ],
-      "threejs_spectrum_requirements": [
-        "Buat canvas Three.js khusus untuk voice spectrum",
-        "Gunakan bentuk bar spectrum 3D atau gelombang audio 3D",
-        "Animasi spectrum aktif saat voice recognition berjalan",
-        "Spectrum meredup atau berhenti saat voice recognition berhenti"
-      ]
-    },
-    "dashboard_suhu": {
-      "title": "Monitoring Suhu",
-      "features": [
-        "Menampilkan nilai suhu realtime dari MQTT",
-        "Menampilkan satuan derajat Celsius",
-        "Menampilkan emoticon 3D menggunakan Three.js Geometry",
-        "Emoticon berubah berdasarkan angka suhu",
-        "Warna dan ekspresi emoticon berubah sesuai kondisi suhu"
-      ],
-      "temperature_emoticon_logic": [
-        {
-          "condition": "temperature < 25",
-          "status": "Dingin",
-          "emoticon": "Wajah dingin atau menggigil",
-          "color": "Biru",
-          "animation": "Bergetar pelan"
-        },
-        {
-          "condition": "temperature >= 25 && temperature <= 30",
-          "status": "Normal",
-          "emoticon": "Wajah senyum",
-          "color": "Hijau",
-          "animation": "Berputar pelan"
-        },
-        {
-          "condition": "temperature > 30 && temperature <= 35",
-          "status": "Panas",
-          "emoticon": "Wajah kepanasan",
-          "color": "Oranye",
-          "animation": "Berputar lebih cepat"
-        },
-        {
-          "condition": "temperature > 35",
-          "status": "Sangat Panas",
-          "emoticon": "Wajah sangat panas atau merah",
-          "color": "Merah",
-          "animation": "Bergetar cepat"
-        }
-      ]
-    },
-    "dashboard_kelembapan": {
-      "title": "Monitoring Kelembapan",
-      "features": [
-        "Menampilkan nilai kelembapan realtime dari MQTT",
-        "Menampilkan satuan persen",
-        "Menampilkan emoticon 3D menggunakan Three.js Geometry",
-        "Emoticon berubah berdasarkan angka kelembapan",
-        "Warna dan ekspresi emoticon berubah sesuai kondisi kelembapan"
-      ],
-      "humidity_emoticon_logic": [
-        {
-          "condition": "humidity < 40",
-          "status": "Kering",
-          "emoticon": "Wajah kering atau kurang nyaman",
-          "color": "Kuning",
-          "animation": "Berputar lambat"
-        },
-        {
-          "condition": "humidity >= 40 && humidity <= 70",
-          "status": "Normal",
-          "emoticon": "Wajah senyum",
-          "color": "Hijau",
-          "animation": "Berputar stabil"
-        },
-        {
-          "condition": "humidity > 70",
-          "status": "Lembap",
-          "emoticon": "Wajah berkeringat atau basah",
-          "color": "Biru muda",
-          "animation": "Gelombang naik turun"
-        }
-      ]
+  }
+}
+
+// =====================================================
+// 12. FUNGSI MODE KIRI-KANAN
+// =====================================================
+void jalankanModeKiriKanan() {
+  if (millis() - lastModeStep < modeStepInterval) {
+    return;
+  }
+
+  lastModeStep = millis();
+
+  matikanSemuaRelay();
+
+  int step = modeIndex;
+
+  if (step == 0) setRelayHardware(0, true);
+  if (step == 1) setRelayHardware(1, true);
+  if (step == 2) setRelayHardware(2, true);
+  if (step == 3) setRelayHardware(3, true);
+  if (step == 4) setRelayHardware(2, true);
+  if (step == 5) setRelayHardware(1, true);
+
+  modeIndex++;
+
+  if (modeIndex > 5) {
+    modeIndex = 0;
+  }
+}
+
+// =====================================================
+// 13. FUNGSI MODE STROBO
+// =====================================================
+void jalankanModeStrobo() {
+  if (millis() - lastModeStep < modeStepInterval) {
+    return;
+  }
+
+  lastModeStep = millis();
+
+  stroboState = !stroboState;
+
+  if (stroboState) {
+    nyalakanSemuaRelay();
+  } else {
+    matikanSemuaRelay();
+  }
+}
+
+// =====================================================
+// 14. FUNGSI JALANKAN MODE
+// =====================================================
+void jalankanModeLampu() {
+  if (!modeActive || currentMode == "NORMAL") {
+    return;
+  }
+
+  if (currentMode == "KIRI_KANAN") {
+    jalankanModeKiriKanan();
+  } else if (currentMode == "STROBO") {
+    jalankanModeStrobo();
+  }
+}
+
+// =====================================================
+// 15. FUNGSI KONEKSI WIFI
+// =====================================================
+void koneksiWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  Serial.print("Menghubungkan ke WiFi");
+
+  unsigned long waktuMulai = millis();
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+
+    if (millis() - waktuMulai > 30000) {
+      Serial.println();
+      Serial.println("Gagal terhubung ke WiFi.");
+      Serial.println("Periksa SSID dan password WiFi.");
+      return;
     }
-  },
-  "setting_menu_requirements": {
-    "mqtt_configuration": {
-      "title": "Konfigurasi MQTT",
-      "features": [
-        "Form konfigurasi untuk 3 MQTT broker",
-        "Input host atau WebSocket URL broker",
-        "Input port broker",
-        "Input username broker",
-        "Input password broker",
-        "Input client ID",
-        "Input base topic",
-        "Tombol simpan konfigurasi",
-        "Tombol test koneksi broker",
-        "Tombol reset konfigurasi",
-        "Konfigurasi disimpan di localStorage",
-        "Jangan hardcode password asli di source code"
-      ],
-      "broker_forms": [
-        {
-          "broker_name": "MyQttHub",
-          "fields": [
-            "WebSocket URL",
-            "Port",
-            "Username",
-            "Password",
-            "Client ID"
-          ]
-        },
-        {
-          "broker_name": "Cedalo MQTT",
-          "fields": [
-            "WebSocket URL",
-            "Port",
-            "Username",
-            "Password",
-            "Client ID"
-          ]
-        },
-        {
-          "broker_name": "CrystalMQ",
-          "fields": [
-            "WebSocket URL",
-            "Port",
-            "Username",
-            "Password",
-            "Client ID"
-          ]
-        }
-      ]
+  }
+
+  Serial.println();
+  Serial.println("WiFi berhasil terhubung.");
+  Serial.print("IP ESP32: ");
+  Serial.println(WiFi.localIP());
+}
+
+// =====================================================
+// 16. FUNGSI KIRIM STATUS DEVICE
+// =====================================================
+void kirimStatusDevice() {
+  String ipAddress = WiFi.localIP().toString();
+  String timestamp = getTimestampISO();
+
+  Serial.println("Mengirim status device ke Firebase...");
+
+  Database.set<String>(
+    asyncClient,
+    "/device/status",
+    "online",
+    processData,
+    "setDeviceStatus"
+  );
+
+  Database.set<String>(
+    asyncClient,
+    "/device/ipAddress",
+    ipAddress,
+    processData,
+    "setDeviceIP"
+  );
+
+  Database.set<String>(
+    asyncClient,
+    "/device/lastSeen",
+    timestamp,
+    processData,
+    "setDeviceLastSeen"
+  );
+}
+
+// =====================================================
+// 17. FUNGSI KIRIM DATA SENSOR
+// =====================================================
+void kirimDataSensor() {
+  float suhu = dht.readTemperature();
+  float kelembapan = dht.readHumidity();
+
+  if (isnan(suhu) || isnan(kelembapan)) {
+    Serial.println("Gagal membaca sensor DHT!");
+    return;
+  }
+
+  String timestamp = getTimestampISO();
+
+  Serial.println("------------------------------------");
+  Serial.print("Suhu       : ");
+  Serial.print(suhu);
+  Serial.println(" °C");
+
+  Serial.print("Kelembapan : ");
+  Serial.print(kelembapan);
+  Serial.println(" %");
+
+  Serial.print("Update     : ");
+  Serial.println(timestamp);
+
+  Database.set<float>(
+    asyncClient,
+    "/sensor/temperature",
+    suhu,
+    processData,
+    "setTemperature"
+  );
+
+  Database.set<float>(
+    asyncClient,
+    "/sensor/humidity",
+    kelembapan,
+    processData,
+    "setHumidity"
+  );
+
+  Database.set<String>(
+    asyncClient,
+    "/sensor/lastUpdate",
+    timestamp,
+    processData,
+    "setSensorLastUpdate"
+  );
+}
+
+// =====================================================
+// 18. FUNGSI BACA STATUS RELAY DARI FIREBASE
+// =====================================================
+void bacaRelayFirebase() {
+  bool r1 = Database.get<bool>(asyncClient, "/relay/relay1");
+  bool r2 = Database.get<bool>(asyncClient, "/relay/relay2");
+  bool r3 = Database.get<bool>(asyncClient, "/relay/relay3");
+  bool r4 = Database.get<bool>(asyncClient, "/relay/relay4");
+
+  // Relay manual hanya diterapkan jika mode tidak aktif
+  if (!modeActive || currentMode == "NORMAL") {
+    setRelayHardware(0, r1);
+    setRelayHardware(1, r2);
+    setRelayHardware(2, r3);
+    setRelayHardware(3, r4);
+  }
+}
+
+
+// =====================================================
+// 19. FUNGSI BACA MODE DARI FIREBASE
+// =====================================================
+void bacaModeFirebase() {
+  String modeName = Database.get<String>(asyncClient, "/mode/name");
+  bool active = Database.get<bool>(asyncClient, "/mode/active");
+
+  // Jika mode kosong, anggap NORMAL
+  if (modeName == "" || modeName == "null") {
+    modeName = "NORMAL";
+  }
+
+  if (modeName != currentMode || active != modeActive) {
+    Serial.println("------------------------------------");
+    Serial.print("Mode berubah: ");
+    Serial.print(modeName);
+    Serial.print(" | Active: ");
+    Serial.println(active ? "true" : "false");
+
+    currentMode = modeName;
+    modeActive = active;
+
+    modeIndex = 0;
+    stroboState = false;
+    lastModeStep = 0;
+
+    if (!modeActive || currentMode == "NORMAL") {
+      matikanSemuaRelay();
     }
-  },
-  "static_menu_requirements": {
-    "data_suhu": {
-      "title": "Data Suhu",
-      "features": [
-        "Menampilkan tabel riwayat suhu",
-        "Menampilkan waktu data diterima",
-        "Menampilkan broker asal data",
-        "Menampilkan nilai suhu",
-        "Menyediakan tombol hapus data lokal"
-      ]
-    },
-    "data_kelembapan": {
-      "title": "Data Kelembapan",
-      "features": [
-        "Menampilkan tabel riwayat kelembapan",
-        "Menampilkan waktu data diterima",
-        "Menampilkan broker asal data",
-        "Menampilkan nilai kelembapan",
-        "Menyediakan tombol hapus data lokal"
-      ]
-    },
-    "log_mqtt": {
-      "title": "Log MQTT",
-      "features": [
-        "Menampilkan semua aktivitas MQTT",
-        "Log koneksi broker",
-        "Log publish",
-        "Log subscribe",
-        "Log error koneksi",
-        "Log perintah relay",
-        "Log perintah suara",
-        "Menyediakan tombol clear log"
-      ]
+  }
+}
+
+// =====================================================
+// 20. SETUP
+// =====================================================
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println();
+  Serial.println("====================================");
+  Serial.println("ESP32 + FIREBASE + DHT + 4 RELAY");
+  Serial.println("====================================");
+
+  dht.begin();
+
+  for (int i = 0; i < 4; i++) {
+    pinMode(relayPins[i], OUTPUT);
+    digitalWrite(relayPins[i], RELAY_OFF);
+  }
+
+  koneksiWiFi();
+
+  configTime(gmtOffset_sec, daylightOffset_sec, "pool.ntp.org", "time.google.com");
+
+  Serial.println("Menunggu sinkronisasi waktu...");
+  delay(2000);
+
+  sslClient.setInsecure();
+  sslClient.setConnectionTimeout(10000);
+  sslClient.setHandshakeTimeout(10);
+
+  Serial.println("Memulai autentikasi Firebase...");
+
+  initializeApp(
+    asyncClient,
+    app,
+    getAuth(userAuth),
+    processData,
+    "authTask"
+  );
+
+  app.getApp<RealtimeDatabase>(Database);
+  Database.url(DATABASE_URL);
+}
+
+// =====================================================
+// 21. LOOP
+// =====================================================
+void loop() {
+  app.loop();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi terputus. Menghubungkan ulang...");
+    koneksiWiFi();
+  }
+
+  if (app.ready() && !statusSudahDikirim) {
+    statusSudahDikirim = true;
+
+    Serial.println();
+    Serial.println("Firebase siap.");
+    kirimStatusDevice();
+  }
+
+  if (app.ready()) {
+    if (millis() - lastDeviceUpdate >= deviceUpdateInterval) {
+      lastDeviceUpdate = millis();
+      kirimStatusDevice();
     }
-  },
-  "kontrol_menu_requirements": {
-    "kontrol_relay": {
-      "title": "Kontrol Relay",
-      "features": [
-        "Menampilkan 4 card relay",
-        "Setiap relay memiliki tombol ON dan OFF",
-        "Setiap relay menampilkan status ON atau OFF",
-        "Tombol nyalakan semua relay",
-        "Tombol matikan semua relay",
-        "Tombol Variasi 1",
-        "Tombol Variasi 2",
-        "Semua perintah relay dipublish ke 3 MQTT broker sekaligus",
-        "Status relay diperbarui dari topic MQTT state"
-      ],
-      "relay_list": [
-        "Relay 1",
-        "Relay 2",
-        "Relay 3",
-        "Relay 4"
-      ],
-      "relay_variations": [
-        {
-          "name": "VARIASI1",
-          "description": "Relay menyala bergantian dari kiri ke kanan: Relay 1, Relay 2, Relay 3, Relay 4"
-        },
-        {
-          "name": "VARIASI2",
-          "description": "Semua relay berkedip bersama seperti efek strobe"
-        }
-      ]
+
+    if (millis() - lastSensorSend >= sensorInterval) {
+      lastSensorSend = millis();
+      kirimDataSensor();
     }
-  },
-  "mqtt_brokers": [
-    {
-      "name": "MyQttHub",
-      "type": "MQTT Broker 1",
-      "websocket_url_placeholder": "wss://ISI_WEBSOCKET_MYQTTHUB",
-      "username_placeholder": "ISI_USERNAME_MYQTTHUB",
-      "password_placeholder": "ISI_PASSWORD_MYQTTHUB",
-      "client_id_placeholder": "web_myqtthub_${random_id}"
-    },
-    {
-      "name": "Cedalo MQTT",
-      "type": "MQTT Broker 2",
-      "websocket_url_placeholder": "wss://ISI_WEBSOCKET_CEDALO",
-      "username_placeholder": "ISI_USERNAME_CEDALO",
-      "password_placeholder": "ISI_PASSWORD_CEDALO",
-      "client_id_placeholder": "web_cedalo_${random_id}"
-    },
-    {
-      "name": "CrystalMQ",
-      "type": "MQTT Broker 3",
-      "websocket_url_placeholder": "wss://ISI_WEBSOCKET_CRYSTALMQ",
-      "username_placeholder": "ISI_USERNAME_CRYSTALMQ",
-      "password_placeholder": "ISI_PASSWORD_CRYSTALMQ",
-      "client_id_placeholder": "web_crystalmq_${random_id}"
+
+    if (millis() - lastModeRead >= modeReadInterval) {
+      lastModeRead = millis();
+      bacaModeFirebase();
     }
-  ],
-  "mqtt_base_topic": "gusliyanza/iot-multibroker",
-  "mqtt_topics": {
-    "sensor": "gusliyanza/iot-multibroker/sensor",
-    "relay_set": [
-      "gusliyanza/iot-multibroker/relay/1/set",
-      "gusliyanza/iot-multibroker/relay/2/set",
-      "gusliyanza/iot-multibroker/relay/3/set",
-      "gusliyanza/iot-multibroker/relay/4/set"
-    ],
-    "relay_state": [
-      "gusliyanza/iot-multibroker/relay/1/state",
-      "gusliyanza/iot-multibroker/relay/2/state",
-      "gusliyanza/iot-multibroker/relay/3/state",
-      "gusliyanza/iot-multibroker/relay/4/state"
-    ],
-    "mode_set": "gusliyanza/iot-multibroker/mode/set",
-    "voice_command": "gusliyanza/iot-multibroker/voice/cmd",
-    "system_log": "gusliyanza/iot-multibroker/log"
-  },
-  "mqtt_payload_format": {
-    "sensor_payload_example": {
-      "temperature": 30.5,
-      "humidity": 72.1,
-      "timestamp": "2026-06-05 04:00:00"
-    },
-    "relay_payload": [
-      "ON",
-      "OFF"
-    ],
-    "mode_payload": [
-      "VARIASI1",
-      "VARIASI2"
-    ],
-    "voice_payload_examples": [
-      "nyalakan relay 1",
-      "matikan relay 1",
-      "nyalakan relay 2",
-      "matikan relay 2",
-      "nyalakan relay 3",
-      "matikan relay 3",
-      "nyalakan relay 4",
-      "matikan relay 4",
-      "nyalakan semua relay",
-      "matikan semua relay",
-      "jalankan variasi 1",
-      "jalankan variasi 2",
-      "baca suhu",
-      "baca kelembapan"
-    ]
-  },
-  "voice_command_requirements": {
-    "language": "id-ID",
-    "use_web_speech_api": true,
-    "features": [
-      "Mengenali perintah suara bahasa Indonesia",
-      "Menampilkan teks hasil suara pada dashboard",
-      "Mengirim hasil suara ke topic voice command di 3 broker MQTT",
-      "Memberikan feedback visual ketika mendengarkan suara",
-      "Menggunakan Three.js spectrum sebagai visualisasi suara"
-    ],
-    "command_mapping": [
-      {
-        "spoken_text": "nyalakan relay 1",
-        "mqtt_topic": "gusliyanza/iot-multibroker/relay/1/set",
-        "payload": "ON"
-      },
-      {
-        "spoken_text": "matikan relay 1",
-        "mqtt_topic": "gusliyanza/iot-multibroker/relay/1/set",
-        "payload": "OFF"
-      },
-      {
-        "spoken_text": "nyalakan semua relay",
-        "mqtt_action": "Publish ON ke semua relay"
-      },
-      {
-        "spoken_text": "matikan semua relay",
-        "mqtt_action": "Publish OFF ke semua relay"
-      },
-      {
-        "spoken_text": "jalankan variasi 1",
-        "mqtt_topic": "gusliyanza/iot-multibroker/mode/set",
-        "payload": "VARIASI1"
-      },
-      {
-        "spoken_text": "jalankan variasi 2",
-        "mqtt_topic": "gusliyanza/iot-multibroker/mode/set",
-        "payload": "VARIASI2"
-      },
-      {
-        "spoken_text": "baca suhu",
-        "action": "Website membacakan nilai suhu terakhir menggunakan SpeechSynthesis API"
-      },
-      {
-        "spoken_text": "baca kelembapan",
-        "action": "Website membacakan nilai kelembapan terakhir menggunakan SpeechSynthesis API"
-      }
-    ]
-  },
-  "threejs_requirements": {
-    "temperature_geometry": {
-      "description": "Gunakan Three.js untuk membuat emoticon 3D suhu yang berubah berdasarkan nilai suhu.",
-      "objects": [
-        "SphereGeometry untuk wajah",
-        "Geometry kecil untuk mata",
-        "Curve atau Torus untuk mulut",
-        "Partikel kecil untuk efek panas atau dingin"
-      ],
-      "behavior": [
-        "Objek bisa diputar menggunakan mouse",
-        "Objek otomatis berputar pelan",
-        "Ekspresi berubah berdasarkan suhu",
-        "Warna berubah berdasarkan suhu"
-      ]
-    },
-    "humidity_geometry": {
-      "description": "Gunakan Three.js untuk membuat emoticon 3D kelembapan yang berubah berdasarkan nilai kelembapan.",
-      "objects": [
-        "SphereGeometry untuk wajah",
-        "Droplet geometry atau bentuk tetesan air",
-        "Partikel air untuk kondisi lembap"
-      ],
-      "behavior": [
-        "Objek bisa diputar menggunakan mouse",
-        "Objek otomatis bergerak naik turun",
-        "Ekspresi berubah berdasarkan kelembapan",
-        "Warna berubah berdasarkan kelembapan"
-      ]
-    },
-    "voice_spectrum": {
-      "description": "Gunakan Three.js untuk membuat spectrum audio 3D pada menu Voice.",
-      "objects": [
-        "Bar spectrum 3D",
-        "Gelombang berbentuk lingkaran",
-        "Partikel bergerak saat voice recognition aktif"
-      ],
-      "behavior": [
-        "Spectrum aktif saat user menekan tombol mulai voice",
-        "Spectrum bergerak mengikuti simulasi intensitas suara",
-        "Spectrum berhenti atau mengecil saat voice dimatikan"
-      ]
+
+    if (millis() - lastRelayRead >= relayReadInterval) {
+      lastRelayRead = millis();
+      bacaRelayFirebase();
     }
-  },
-  "ui_design_requirements": {
-    "theme": "Modern dark IoT dashboard",
-    "color_style": [
-      "Dark navy",
-      "Blue accent",
-      "Green accent",
-      "Glassmorphism card",
-      "Neon glow untuk status aktif"
-    ],
-    "responsive": true,
-    "mobile_friendly": true,
-    "components": [
-      "Login page",
-      "Topbar",
-      "Collapsible sidebar",
-      "Dashboard content",
-      "3D suhu card",
-      "3D kelembapan card",
-      "3D voice spectrum card",
-      "MQTT setting form",
-      "Relay control card",
-      "Data table suhu",
-      "Data table kelembapan",
-      "Log MQTT panel"
-    ]
-  },
-  "logic_requirements": {
-    "connect_to_all_brokers": true,
-    "publish_to_all_brokers": true,
-    "subscribe_to_all_brokers": true,
-    "handle_reconnect": true,
-    "show_connection_status": true,
-    "parse_sensor_json": true,
-    "update_temperature_realtime": true,
-    "update_humidity_realtime": true,
-    "update_threejs_emoticon_realtime": true,
-    "update_relay_status_realtime": true,
-    "save_mqtt_config_to_localStorage": true,
-    "save_temperature_history_to_localStorage": true,
-    "save_humidity_history_to_localStorage": true,
-    "save_mqtt_log_to_localStorage": true
-  },
-  "file_structure": {
-    "generate_files": [
-      {
-        "filename": "index.html",
-        "description": "Halaman utama dashboard setelah login"
-      },
-      {
-        "filename": "login.html",
-        "description": "Halaman login dan register Firebase Authentication"
-      },
-      {
-        "filename": "style.css",
-        "description": "Style dashboard, login page, topbar, sidebar, card, table, dan responsive design"
-      },
-      {
-        "filename": "firebase-config.js",
-        "description": "Konfigurasi Firebase Authentication menggunakan placeholder"
-      },
-      {
-        "filename": "mqtt-config.js",
-        "description": "Konfigurasi default MQTT broker menggunakan placeholder dan localStorage"
-      },
-      {
-        "filename": "app.js",
-        "description": "Logic utama dashboard, navigasi menu, sidebar, MQTT, relay, data, log, dan voice command"
-      },
-      {
-        "filename": "three-scene.js",
-        "description": "Logic Three.js untuk emoticon suhu, emoticon kelembapan, dan voice spectrum"
-      }
-    ],
-    "code_style": [
-      "Kode harus rapi",
-      "Kode diberi komentar penjelasan",
-      "Gunakan nama variabel yang mudah dipahami",
-      "Jangan hardcode password asli",
-      "Gunakan placeholder untuk Firebase dan MQTT"
-    ]
-  },
-  "firebase_config_placeholder": {
-    "apiKey": "ISI_FIREBASE_API_KEY",
-    "authDomain": "ISI_FIREBASE_AUTH_DOMAIN",
-    "projectId": "ISI_FIREBASE_PROJECT_ID",
-    "storageBucket": "ISI_FIREBASE_STORAGE_BUCKET",
-    "messagingSenderId": "ISI_FIREBASE_MESSAGING_SENDER_ID",
-    "appId": "ISI_FIREBASE_APP_ID"
-  },
-  "important_notes": [
-    "Website harus menggunakan MQTT over WebSocket atau WSS karena browser tidak bisa langsung menggunakan MQTT TCP port 1883.",
-    "Jika salah satu broker tidak mendukung WebSocket, tetap buat struktur konfigurasi agar bisa diisi dengan WSS broker atau backend bridge.",
-    "Semua password MQTT dan Firebase config gunakan placeholder.",
-    "Website harus bisa dijalankan sebagai static web dan siap dihosting di Firebase Hosting.",
-    "Pastikan menu sidebar bisa dibuka dan ditutup.",
-    "Pastikan topbar menampilkan akun yang sedang login.",
-    "Pastikan logout Firebase tersedia di sidebar.",
-    "Pastikan suhu dan kelembapan memiliki visual emoticon 3D berbeda sesuai nilai angka.",
-    "Pastikan voice command memiliki visual spectrum 3D."
-  ],
-  "final_request": "Buatkan kode lengkap untuk seluruh file berdasarkan spesifikasi JSON ini. Pastikan website memiliki login dan logout Firebase Authentication, topbar akun login, sidebar buka tutup, menu Dashboard untuk Voice/Suhu/Kelembapan, menu Setting untuk konfigurasi MQTT, menu Static untuk data suhu/kelembapan/log, menu Kontrol untuk relay, animasi Three.js untuk emoticon suhu dan kelembapan, serta Three.js spectrum untuk voice command."
+
+    jalankanModeLampu();
+  }
 }
